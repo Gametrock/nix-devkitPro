@@ -166,7 +166,7 @@ let
 
         runHook postCheck
       '';
-      
+
       installPhase = ''
         mkdir -p "$out"
         cp ${spec.artifact} example.elf elf-header.txt artifact-type.txt makefile.sha256 "$out/"
