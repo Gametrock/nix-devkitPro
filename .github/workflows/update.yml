@@ -1,0 +1,186 @@
+name: Update sources
+
+on:
+  schedule:
+    - cron: '23 5 * * 1' # Mondays at 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-sources-main
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update and check SDKs
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    
+    permissions:
+      contents: read
+      pull-requests: read
+
+    outputs:
+      ready: ${{ steps.pins.outcome == 'success' }}
+      checks: ${{ steps.checks.outcome }}
+      base: ${{ steps.base.outputs.sha }}
+
+    steps:
+      - name: Check for an open update PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:automation/update-sources" \
+            --jq 'length')
+          if [[ "$count" != 0 ]]; then
+            echo 'open=true' >> "$GITHUB_OUTPUT"
+            echo 'An update PR is already open. Leaving it unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'open=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.existing.outputs.open == 'false'
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Record update base
+        id: base
+        if: steps.existing.outputs.open == 'false'
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        if: steps.existing.outputs.open == 'false'
+        with:
+          enable_kvm: false
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update SDK image pins
+        id: images
+        if: steps.existing.outputs.open == 'false'
+        run: |
+          nix run .#update-images -- all
+          if git diff --quiet -- nix/images/devkitarm.json nix/images/devkitppc.json nix/images/devkita64.json; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            echo 'No SDK updates available.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Update flake inputs and run full checks
+        id: checks
+        if: steps.images.outputs.changed == 'true'
+        timeout-minutes: 90
+
+        # A failed update/check should still produce a draft PR.
+        continue-on-error: true
+
+        run: |
+          nix flake update
+          nix flake check -L --keep-going
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: pins
+        if: steps.images.outputs.changed == 'true'
+        with:
+          name: source-pins
+          path: |
+            flake.lock
+            nix/images/devkitarm.json
+            nix/images/devkitppc.json
+            nix/images/devkita64.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Report failed checks
+        if: steps.checks.outcome == 'failure'
+        run: |
+          echo 'SDK update checks failed. The update will be proposed as a draft PR.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+  pull-request:
+    name: Propose SDK updates
+    needs: update
+    if: ${{ !cancelled() && needs.update.outputs.ready == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Check before publishing in case a PR was opened during the builds.
+      - name: Check for an open update PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count=$(gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f "head=$GITHUB_REPOSITORY_OWNER:automation/update-sources" \
+            --jq 'length')
+          if [[ "$count" != 0 ]]; then
+            echo 'open=true' >> "$GITHUB_OUTPUT"
+            echo 'An update PR is already open. Leaving it unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'open=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.existing.outputs.open == 'false'
+        with:
+          ref: ${{ needs.update.outputs.base }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.existing.outputs.open == 'false'
+        with:
+          name: source-pins
+
+      - name: Prepare PR description
+        id: description
+        if: steps.existing.outputs.open == 'false'
+        env:
+          CHECKS: ${{ needs.update.outputs.checks }}
+        run: |
+          {
+            echo 'body<<PR_BODY'
+            echo 'Updates the devkitPro SDK images and dependencies.'
+            echo
+            if [[ "$CHECKS" == success ]]; then
+              echo 'SDK checks passed.'
+            else
+              echo '⚠️ Checks failed. Fix the failures before merging.'
+            fi
+            printf '\n[View checks](%s/%s/actions/runs/%s)\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            echo 'PR_BODY'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open update PR
+        id: pr
+        if: steps.existing.outputs.open == 'false'
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: automation/update-sources
+          draft: ${{ needs.update.outputs.checks != 'success' }}
+          add-paths: |
+            flake.lock
+            nix/images/devkitarm.json
+            nix/images/devkitppc.json
+            nix/images/devkita64.json
+          commit-message: 'chore: update devkitPro SDKs'
+          title: 'chore: update devkitPro SDKs'
+          body: ${{ steps.description.outputs.body }}
+
+      - name: Summarize
+        if: steps.pr.outputs.pull-request-url != ''
+        env:
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: |
+          printf 'SDK update PR: %s\n' "$PR_URL" >> "$GITHUB_STEP_SUMMARY"
