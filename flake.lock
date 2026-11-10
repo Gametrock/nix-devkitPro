@@ -1,0 +1,61 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1794042290,
+        "narHash": "sha256-ziZn2PvCJE5JEEpqTdxXwJpPB+L3YqoCpTAMCzyaP3U=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "f4a03c008967841f2a0b3cb7c436fc6fc31671f6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "switch-examples": "switch-examples",
+        "wiiu-examples": "wiiu-examples"
+      }
+    },
+    "switch-examples": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1769988122,
+        "narHash": "sha256-TyWmzk5b7q4GS5LaQ2wQ9MWVc+ulkWvK14BuLdya0MI=",
+        "owner": "switchbrew",
+        "repo": "switch-examples",
+        "rev": "669786898205b7beb25ff1731e72982e6d0397d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "switchbrew",
+        "repo": "switch-examples",
+        "type": "github"
+      }
+    },
+    "wiiu-examples": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1697052531,
+        "narHash": "sha256-a6jb48iU+37a5AKuGt8VSJPHcpv4WKnq76vQiAYOZwg=",
+        "owner": "devkitPro",
+        "repo": "wiiu-examples",
+        "rev": "011d95b67c6ed87ccff8b62d5e55ae4eaea1c7a5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "devkitPro",
+        "repo": "wiiu-examples",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

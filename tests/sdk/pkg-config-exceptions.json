@@ -1,0 +1,7 @@
+{
+  "switch/glfw3": {
+    "package": "switch-glfw-3.3.4-2",
+    "missingRequirement": "vulkan",
+    "reason": "The pinned devkita64 image installs glfw3.pc with Requires.private: vulkan egl, but contains neither vulkan.pc nor a Switch Vulkan library."
+  }
+}
